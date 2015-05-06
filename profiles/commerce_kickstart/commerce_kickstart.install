@@ -56,6 +56,7 @@ function commerce_kickstart_install_tasks_alter(&$tasks, $install_state) {
   $tasks['install_select_profile']['display'] = FALSE;
   $tasks['install_select_locale']['display'] = FALSE;
   $tasks['install_select_locale']['run'] = INSTALL_TASK_SKIP;
+  $tasks['install_profile_modules']['display_name'] = st('Install Commerce Kickstart 2');
 
   // The "Welcome" screen needs to come after the first two steps
   // (profile and language selection), despite the fact that they are disabled.
@@ -70,21 +71,27 @@ function commerce_kickstart_install_tasks_alter(&$tasks, $install_state) {
 
   // Set the installation theme.
   _commerce_kickstart_set_theme('commerce_kickstart_admin');
-  // Test if the current task is a batch task.
-  if (isset($tasks[$install_state['active_task']]['type']) && $tasks[$install_state['active_task']]['type'] == 'batch') {
-    if (!isset($tasks[$install_state['active_task']]['dfp_settings'])) {
-      $tasks[$install_state['active_task']]['dfp_settings'] = array();
+
+  // Add the DFP javascript if needed.
+  if (!empty($install_state['parameters']['use_dfp'])) {
+    // Test if the current task is a batch task.
+    if (isset($tasks[$install_state['active_task']]['type']) && $tasks[$install_state['active_task']]['type'] == 'batch') {
+      if (!isset($tasks[$install_state['active_task']]['dfp_settings'])) {
+        $tasks[$install_state['active_task']]['dfp_settings'] = array();
+      }
+      // Default to Kickstart_Install dfp unit.
+      $tasks[$install_state['active_task']]['dfp_settings'] += array(
+        'dfp_unit' => 'Kickstart_Install',
+      );
+
+      drupal_add_js(array(
+        'dfp' => $tasks[$install_state['active_task']]['dfp_settings'],
+      ), 'setting');
+
+      $prefix = (isset($_SERVER['HTTPS']) && strtolower($_SERVER['HTTPS']) == 'on') ? 'https://' : 'http://';
+      drupal_add_js($prefix . 'www.googletagservices.com/tag/js/gpt.js');
+      drupal_add_js(drupal_get_path('profile', 'commerce_kickstart') . '/js/commerce_kickstart.js');
     }
-    // Default to Kickstart_Install dfp unit.
-    $tasks[$install_state['active_task']]['dfp_settings'] += array(
-      'dfp_unit' => 'Kickstart_Install',
-    );
-    $prefix = (isset($_SERVER['HTTPS']) && strtolower($_SERVER['HTTPS']) == 'on') ? 'https://' : 'http://';
-    drupal_add_js($prefix . 'www.googletagservices.com/tag/js/gpt.js');
-    drupal_add_js(array(
-      'dfp' => $tasks[$install_state['active_task']]['dfp_settings'],
-    ), 'setting');
-    drupal_add_js(drupal_get_path('profile', 'commerce_kickstart') . '/js/commerce_kickstart.js');
   }
 }
 
@@ -109,7 +116,7 @@ function _commerce_kickstart_set_theme($target_theme) {
  * Task callback: shows the welcome screen.
  */
 function install_welcome($form, &$form_state, &$install_state) {
-  drupal_set_title(st('Privacy Policy Summary'));
+  drupal_set_title(st('Welcome to Commerce Kickstart 2'));
   $message = '<p>' . st('Thank you for choosing Commerce Kickstart, a product offered by Commerce Guys.') . '</p>';
   $eula = '<p>' . st('While we have a rather long, boring Privacy Policy just like any other technology company, here is a short summary of some key items we feel are important:') . '</p>';
   $items = array();
@@ -131,8 +138,14 @@ function install_welcome($form, &$form_state, &$install_state) {
     '#markup' => $eula,
   );
   $form['eula-accept'] = array(
-    '#title' => st('I agree to the Privacy Policy and User Agreement'),
-    '#type' => 'checkbox',
+    '#title' => st('I agree to the User Agreement'),
+    '#title_display' => 'attribute',
+    '#type' => 'radios',
+    '#default_value' => 1,
+    '#options' => array(
+      1 => st('I agree to the Privacy Policy and User Agreement'),
+      0 => st('I want to opt out and disable content from Commerce Guys'),
+    ),
     '#suffix' => '</div>',
   );
   $form['actions'] = array(
@@ -141,11 +154,6 @@ function install_welcome($form, &$form_state, &$install_state) {
   $form['actions']['submit'] = array(
     '#type' => 'submit',
     '#value' => st("Let's Get Started!"),
-    '#states' => array(
-      'disabled' => array(
-        ':input[name="eula-accept"]' => array('checked' => FALSE),
-      ),
-    ),
     '#weight' => 10,
   );
   return $form;
@@ -156,6 +164,7 @@ function install_welcome_submit($form, &$form_state) {
 
   $install_state['parameters']['welcome'] = 'done';
   $install_state['parameters']['locale'] = 'en';
+  $install_state['parameters']['use_dfp'] = $form_state['values']['eula-accept'];
 }
 
 /**
@@ -302,6 +311,7 @@ function commerce_kickstart_configure_store_form_submit(&$form, &$form_state) {
  * after that.
  */
 function commerce_kickstart_install_additional_modules() {
+  global $install_state;
   $install_demo_store = variable_get('commerce_kickstart_demo_store', FALSE);
   if ($install_demo_store) {
     $modules = array(
@@ -362,57 +372,15 @@ function commerce_kickstart_install_additional_modules() {
   }
 
   $store_country = variable_get('commerce_kickstart_store_country', 'US');
-  // Enable Commerce Moneybookers for Germany, France and the UK.
-  if (in_array($store_country, array('GB', 'DE', 'FR'))) {
-    $modules[] = 'commerce_moneybookers';
-    $modules[] = 'commerce_moneybookers_quickcheckout';
-  }
-  // Enable kiala modules.
-  if (in_array($store_country, array('FR', 'SP', 'BE', 'NL', 'LU'))) {
-    $modules[] = 'colorbox';
-    $modules[] = 'commerce_kiala_ps';
-    $modules[] = 'commerce_kiala_track';
-    variable_set('commerce_kiala_settings', array('ls_map_search_embed_type' => 'colorbox'));
-    variable_set('colorbox_load', 1);
-  }
   // Enable Payleap and Paypal for North America.
   if (in_array($store_country, array('CA', 'US'))) {
     $modules[] = 'commerce_payleap';
     $modules[] = 'commerce_payflow';
     $modules[] = 'commerce_paypal_ec';
   }
-  $eu_country_codes = array(
-    'AT',
-    'BE',
-    'BG',
-    'CY',
-    'CZ',
-    'DE',
-    'DK',
-    'EE',
-    'ES',
-    'FI',
-    'FR',
-    'GB',
-    'GR',
-    'HU',
-    'IE',
-    'IT',
-    'LT',
-    'LU',
-    'LV',
-    'MT',
-    'NL',
-    'PL',
-    'PT',
-    'RO',
-    'SE',
-    'SI',
-    'SK',
-  );
-  // Enable Commerce Paypal Express Checkout for Europe.
-  if (in_array($store_country, $eu_country_codes)) {
-    $modules[] = 'commerce_paypal_ec';
+  // Enable the commerce_kickstart_dfp module.
+  if ($install_state['parameters']['use_dfp']) {
+    $modules[] = 'commerce_kickstart_dfp';
   }
 
   // Resolve the dependencies now, so that module_enable() doesn't need
@@ -684,7 +652,8 @@ function commerce_kickstart_install() {
   variable_set('commerce_checkout_progress_block_pages', array_keys(commerce_checkout_pages()));
   // Configure Chosen.
   variable_set('chosen_jquery_selector', '.view-filters .views-exposed-form select');
-  variable_set('chosen_minimum', 0);
+  variable_set('chosen_minimum_single', 'Always Apply');
+  variable_set('chosen_minimum_multiple', 'Always Apply');
   variable_set('chosen_minimum_width', 200);
   variable_set('chosen_search_contains', TRUE);
 
@@ -739,8 +708,41 @@ function _commerce_kickstart_disable_modules($modules) {
     ->execute();
 }
 
-function commerce_kickstart_update_7100() {
-  registry_rebuild();
+/**
+ * Implements hook_update_dependencies().
+ */
+function commerce_kickstart_update_dependencies() {
+  $deps = array();
+  $deps['commerce_kickstart'][7200] = array(
+    'rules' => 7210,
+    'rules' => 7211,
+    'rules' => 7212,
+    'rules' => 7213,
+  );
+  $deps['commerce_kickstart'][7212] = array(
+    'rules' => 7210,
+    'rules' => 7211,
+    'rules' => 7212,
+    'rules' => 7213,
+  );
+  if (module_exists('commerce_discount')) {
+    $deps['commerce_kickstart'][7213] = array(
+      'commerce_discount' => 7101,
+      'commerce_discount' => 7102,
+    );
+  }
+  $deps['commerce_kickstart'][7214] = array(
+    'rules' => 7210,
+    'rules' => 7211,
+    'rules' => 7212,
+    'rules' => 7213,
+  );
+  if (module_exists('commerce_discount')) {
+    $deps['commerce_kickstart'][7219] = array(
+      'commerce_discount' => 7104,
+    );
+  }
+  return $deps;
 }
 
 /**
@@ -1145,4 +1147,28 @@ function commerce_kickstart_update_7218() {
   _commerce_kickstart_disable_modules(array('jirafe'));
   variable_del('jirafe_config');
   variable_del('jirafe_create_account_link');
+}
+
+/**
+ * Remove Commerce Kickstart payment example and enable Commerce payment example.
+ */
+function commerce_kickstart_update_7219() {
+  _commerce_kickstart_disable_modules(array('commerce_kickstart_payment'));
+  module_enable(array('commerce_payment_example'));
+}
+
+/**
+ * Configure Chosen.
+ */
+function commerce_kickstart_update_7220() {
+  variable_del('chosen_minimum');
+  variable_set('chosen_minimum_single', 'Always Apply');
+  variable_set('chosen_minimum_multiple', 'Always Apply');
+}
+
+/**
+ * Remove modules that are no longer used (bean, commerce_bean).
+ */
+function commerce_kickstart_update_7221() {
+  _commerce_kickstart_disable_modules(array('bean', 'commerce_bean'));
 }

@@ -2,76 +2,159 @@
 /**
  * @file
  *
- * Rules integration for Commerce checkout by Amazon.
+ * Rules integration for commerce checkout by Amazon IOPN module.
  */
 
 /**
- * Implements hook_rules_condition_info().
+ * Implements hook_rules_event_info().
  */
-function commerce_cba_rules_condition_info() {
-  $conditions = array();
+function commerce_cba_rules_event_info() {
+  $info = array();
 
-  $conditions['commerce_cba_amazon_contract'] = array(
-    'label' => t('Contract from Amazon is set in a Cookie'),
-    'description' => t('Returns TRUE if there\'s a purchase contract id in the cookies, FALSE otherwise. Used to check if the checkout is being processed through checkout by Amazon'),
-    'group' => t('Commerce Checkout by Amazon'),
-    'parameter' => array(),
-    'callbacks' => array(
-      'execute' => 'commerce_cba_rules_amazon_contract',
-    ),
-  );
-  $conditions['commerce_cba_amazon_wallet'] = array(
-    'label' => t('User has selected a payment method from the Amazon Wallet widget'),
-    'description' => t('Checks if the user has selected one of the payment methods available in the wallet'),
-    'group' => t('Commerce Checkout by Amazon'),
-    'parameter' => array(
+  $info['commerce_cba_iopn_new_order_notification'] = array(
+    'group' => t('Commerce cba'),
+    'label' => t('New Order notification received from Amazon'),
+    'variables' => array(
       'commerce_order' => array(
         'type' => 'commerce_order',
-        'label' => t('Order'),
+        'label' => t('Commerce order'),
       ),
-    ),
-    'callbacks' => array(
-      'execute' => 'commerce_cba_rules_amazon_wallet',
+      'shipping_address' => array(
+        'type' => 'struct',
+        'label' => t('Shipping address returned by Amazon'),
+      ),
+      'buyer_info' => array(
+        'type' => 'struct',
+        'label' => t('Buyer info returned by Amazon'),
+        'description' => t('Normally buyer name and email address'),
+      ),
     ),
   );
 
-  $conditions['commerce_cba_amazon_address'] = array(
-    'label' => t('User has selected an address from the Amazon Address widget'),
-    'description' => t('Checks if the user has selected an address for a given customer profile'),
-    'group' => t('Commerce Checkout by Amazon'),
+  $info['commerce_cba_iopn_rts_order_notification'] = array(
+    'group' => t('Commerce cba'),
+    'label' => t('Ready to ship Order notification received from Amazon'),
+    'variables' => array(
+      'commerce_order' => array(
+        'type' => 'commerce_order',
+        'label' => t('Commerce order'),
+      ),
+      'shipping_address' => array(
+        'type' => 'struct',
+        'label' => t('Shipping address returned by Amazon'),
+      ),
+      'billing_address' => array(
+        'type' => 'struct',
+        'label' => t('Shipping address returned by Amazon'),
+      ),
+      'buyer_info' => array(
+        'type' => 'struct',
+        'label' => t('Buyer info returned by Amazon'),
+        'description' => t('Normally buyer name and email address'),
+      ),
+    ),
+  );
+
+  $info['commerce_cba_iopn_cancel_order_notification'] = array(
+    'group' => t('Commerce cba'),
+    'label' => t('Cancel Order notification received from Amazon'),
+    'variables' => array(
+      'commerce_order' => array(
+        'type' => 'commerce_order',
+        'label' => t('Commerce order'),
+      ),
+      'shipping_address' => array(
+        'type' => 'struct',
+        'label' => t('Shipping address returned by Amazon'),
+      ),
+      'buyer_info' => array(
+        'type' => 'struct',
+        'label' => t('Buyer info returned by Amazon'),
+        'description' => t('Normally buyer name and email address'),
+      ),
+    ),
+  );
+
+  return $info;
+}
+
+/**
+ * Implements hook_rules_action_info().
+ */
+function commerce_cba_rules_action_info(){
+  $info = array();
+
+  $info['commerce_cba_iopn_save_customer_profile'] = array(
+    'group' => t('Commerce cba'),
+    'base' => 'commerce_cba_save_customer_profile_from_amazon_address',
+    'label' => t('Create/alter the customer profile from the address returned by Amazon'),
+    'description' => t('This will override the customer profile associated to the order if any.'),
     'parameter' => array(
       'commerce_order' => array(
         'type' => 'commerce_order',
-        'label' => t('Order'),
+        'label' => t('Commerce order'),
+        'save' => TRUE,
       ),
-      'commerce_customer' => array(
+      'customer_profile_field' => array(
+        'type' => 'commerce_cba_iopn_select_profile_field',
+        'label' => t('Customer profile type'),
+        'restriction' => 'input',
+      ),
+      'amazon_address' => array(
+        'type' => 'struct',
+        'label' => t('Address data returned by Amazon'),
+      ),
+    ),
+    'provides' => array(
+      'commerce_customer_profile' => array(
         'type' => 'commerce_customer_profile',
-        'label' => t('Customer profile'),
+        'label' => t('Cusomer profile saved'),
       ),
-    ),
-    'callbacks' => array(
-      'execute' => 'commerce_cba_rules_amazon_address',
     ),
   );
 
-  return $conditions;
+  return $info;
 }
 
-function commerce_cba_rules_amazon_contract() {
-  $purchase_contract_id = commerce_cba_get_purchase_contract_id();
-  return isset($purchase_contract_id);
+/**
+ * Implements hook_rules_data_info().
+ */
+function commerce_cba_rules_data_info() {
+  $data['commerce_cba_iopn_select_profile_field'] = array(
+    'label' => t('Select customer profile'),
+    'ui class' => 'RulesDataUICommerceCbaIopnProfile',
+  );
+  return $data;
 }
 
-function commerce_cba_rules_amazon_wallet($order) {
-  if (!isset($order->data['commerce_cba'])) {
-    return FALSE;
+/**
+ * Adds a customer field selection.
+ */
+class RulesDataUICommerceCbaIopnProfile extends RulesDataUI implements RulesDataDirectInputFormInterface {
+
+  public static function inputForm($name, $info, $settings, RulesPlugin $element) {
+    $profile_types = commerce_customer_profile_types();
+    $options = array();
+    foreach ($profile_types as $id => $type) {
+      if ($type['addressfield'] == TRUE) {
+        $options[$id] = $type['name'];
+      }
+    }
+
+    $form[$name] = array(
+      '#type' => 'select',
+      '#title' => t('Select the customer profile field to store the address'),
+      '#options' => $options,
+    );
+    if (!empty($settings) && !empty($settings['customer_profile_field'])) {
+      $form[$name]['#default_value'] = $settings['customer_profile_field'];
+    }
+
+    return $form;
   }
-  return isset($order->data['commerce_cba']['wallet']);
-}
 
-function commerce_cba_rules_amazon_address($order, $customer_profile) {
-  if (!isset($order->data['commerce_cba'])) {
-    return FALSE;
+  public static function render($value) {
+    return array();
   }
-  return isset($order->data['commerce_cba'][$customer_profile->type]);
+
 }

@@ -22,7 +22,7 @@ function commerce_discount_rules_action_info() {
           'wrapped' => TRUE,
         ),
         'commerce_discount' => array(
-          'label' => t('Commerce discount'),
+          'label' => t('Commerce Discount'),
           'type' => 'token',
           'options list' => 'commerce_discount_entity_list',
         ),
@@ -42,7 +42,7 @@ function commerce_discount_rules_action_info() {
         'wrapped' => FALSE,
       ),
       'commerce_discount' => array(
-        'label' => t('Commerce discount'),
+        'label' => t('Commerce Discount'),
         'type' => 'token',
         'options list' => 'commerce_discount_entity_list',
       ),
@@ -92,18 +92,32 @@ function commerce_discount_fixed_amount(EntityDrupalWrapper $wrapper, $discount_
 
   switch ($wrapper->type()) {
     case 'commerce_order':
+
+      // Exit if the wrapper doesn't have a commerce_discounts property.
+      if (!$wrapper->__isset('commerce_discounts')) {
+        return;
+      }
+
       // Set reference to the discount.
       // @todo: It doesn't work with the wrapper.
       $order = $wrapper->value();
+
+      // If the discount will bring the order to less than zero, set the discount
+      // amount so that it stops at zero.
+      $order_amount = $wrapper->commerce_order_total->amount->value();
+      if (-$discount_price['amount'] > $order_amount) {
+        $discount_price['amount'] = -$order_amount;
+      }
+
       $delta = $wrapper->commerce_discounts->count();
       $order->commerce_discounts[LANGUAGE_NONE][$delta]['target_id'] = $discount_wrapper->discount_id->value();
 
-      commerce_discount_add_line_item($wrapper, $discount_name, $discount_price);
+      // Modify the existing discount line item or add a new one if that fails.
+      if (!commerce_discount_set_existing_line_item_price($wrapper, $discount_name, $discount_price)) {
+        commerce_discount_add_line_item($wrapper, $discount_name, $discount_price);
+      }
 
-      // Updating the commerce order calculate price; For some reason, without
-      // the following call to commerce_order_calculate_total() the discount
-      // components aren't re-added after they get deleted in
-      // commerce_discount_commerce_order_presave().
+      // Update the total order price, for the next rules condition (if any).
       commerce_order_calculate_total($order);
       break;
 
@@ -115,6 +129,12 @@ function commerce_discount_fixed_amount(EntityDrupalWrapper $wrapper, $discount_
         if (!empty($component['price']['data']['discount_name']) && $component['price']['data']['discount_name'] == $discount_wrapper->getIdentifier()) {
           return;
         }
+      }
+
+      // Do not allow negative line item totals.
+      $line_item_amount = $wrapper->commerce_unit_price->amount->value();
+      if (-$discount_price['amount'] > $line_item_amount) {
+        $discount_price['amount'] = -$line_item_amount;
       }
 
       commerce_discount_add_price_component($wrapper, $discount_name, $discount_price);
@@ -137,7 +157,10 @@ function commerce_discount_percentage(EntityDrupalWrapper $wrapper, $discount_na
 
   switch ($wrapper->type()) {
     case 'commerce_order':
-      if (!$wrapper->commerce_line_items->value()) {
+
+      // Exit if there are no line items or the wrapper doesn't contain
+      // the commerce_discounts property.
+      if (!$wrapper->commerce_line_items->value() || !$wrapper->__isset('commerce_discounts')) {
         return;
       }
 
@@ -161,12 +184,13 @@ function commerce_discount_percentage(EntityDrupalWrapper $wrapper, $discount_na
           'amount' => $calculated_discount * -1,
           'currency_code' => $wrapper->commerce_order_total->currency_code->value(),
         );
-        commerce_discount_add_line_item($wrapper, $discount_name, $discount_amount);
 
-        // Updating the commerce order calculate price; For some reason, without
-        // the following call to commerce_order_calculate_total() the discount
-        // components aren't re-added after they get deleted in
-        // commerce_discount_commerce_order_presave().
+        // Modify the existing discount line item or add a new one if that fails.
+        if (!commerce_discount_set_existing_line_item_price($wrapper, $discount_name, $discount_amount)) {
+          commerce_discount_add_line_item($wrapper, $discount_name, $discount_amount);
+        }
+
+        // Update the total order price, for the next rules condition (if any).
         commerce_order_calculate_total($order);
       }
       break;
@@ -247,6 +271,11 @@ function commerce_discount_free_products(EntityDrupalWrapper $wrapper, $discount
     return;
   }
 
+  // Exit if the wrapper doesn't have a commerce_discounts property.
+  if (!$wrapper->__isset('commerce_discounts')) {
+    return;
+  }
+
   // Set reference to the discount.
   $order = $wrapper->value();
   $delta = $wrapper->commerce_discounts->count();
@@ -254,8 +283,54 @@ function commerce_discount_free_products(EntityDrupalWrapper $wrapper, $discount
 
   // Loop on products and add each product to order line items.
   foreach ($products as $product) {
-    //TODO: Add display_path property to line item data context in order to expose product link in shopping cart.
-    $data = array('context' => array('commerce_discount_offer' => 'free_products', 'discount_name' => $discount_name));
+    $context = array(
+      'commerce_discount_offer' => 'free_products',
+      'discount_name' => $discount_name
+    );
+
+    // Look for a product display that references this project. This is
+    // imprecise but covers the vastly most common use case.
+    $node_instances = field_info_instances('node');
+
+    foreach ($node_instances as $bundle => $instances) {
+      foreach ($instances as $instance) {
+        $field = field_info_field($instance['field_name']);
+
+        if ($field['type'] == 'commerce_product_reference') {
+          $query = new EntityFieldQuery;
+          $results = $query
+            ->entityCondition('entity_type', 'node')
+            ->fieldCondition($instance['field_name'], 'product_id', $product->product_id)
+            ->propertyCondition('status', 1)
+            ->execute();
+
+          if (!empty($results['node'])) {
+            $nids = array_keys($results['node']);
+
+            // Just take the first one.
+            $node = node_load(reset($nids));
+            $uri = entity_uri('node', $node);
+
+            // Build the context array in order to attach the display path on
+            // product level.
+            $context = array(
+              'entity_id' => $node->nid,
+              'entity_type' => 'node',
+              'display_path' => $uri['path'],
+            );
+
+            // If we have found something, no need to continue.
+            break;
+          }
+        }
+      }
+    }
+
+    // This covers use cases where the above logic is insufficient.
+    $discount = $discount_wrapper->value();
+    drupal_alter('commerce_discount_free_product_context', $context, $product, $discount);
+
+    $data = array('context' => $context);
     $line_item = commerce_product_line_item_new($product, 1, $order->order_id, $data, 'product_discount');
 
     $wrapper_line_item = entity_metadata_wrapper('commerce_line_item', $line_item);
@@ -275,10 +350,7 @@ function commerce_discount_free_products(EntityDrupalWrapper $wrapper, $discount
     $wrapper->commerce_line_items[] = $line_item;
   }
 
-  // Updating the commerce order calculate price; For some reason, without
-  // the following call to commerce_order_calculate_total() the discount
-  // components aren't re-added after they get deleted in
-  // commerce_discount_commerce_order_presave().
+  // Update the total order price, for the next rules condition (if any).
   commerce_order_calculate_total($order);
 }
 
@@ -294,11 +366,14 @@ function commerce_discount_free_products(EntityDrupalWrapper $wrapper, $discount
  */
 function commerce_discount_add_line_item(EntityDrupalWrapper $order_wrapper, $discount_name, $discount_amount) {
   // Create a new line item.
-  $discount_line_item = entity_create('commerce_line_item', array(
+  $values = array(
     'type' => 'commerce_discount',
     'order_id' => $order_wrapper->order_id->value(),
     'quantity' => 1,
-  ));
+    // Flag the line item.
+    'data' => array('discount_name' => $discount_name),
+  );
+  $discount_line_item = entity_create('commerce_line_item', $values);
   $discount_line_item_wrapper = entity_metadata_wrapper('commerce_line_item', $discount_line_item);
 
   // Initialize the line item unit price.
@@ -314,7 +389,7 @@ function commerce_discount_add_line_item(EntityDrupalWrapper $order_wrapper, $di
   );
   $discount_line_item_wrapper->commerce_unit_price->data = commerce_price_component_add($base_price, 'base_price', $base_price, TRUE);
 
-  // Add the actual discount price component.
+  // Add the discount price component.
   commerce_discount_add_price_component($discount_line_item_wrapper, $discount_name, $discount_amount);
 
   // Save the line item and add it to the order.
@@ -347,7 +422,7 @@ function commerce_discount_add_price_component(EntityDrupalWrapper $line_item_wr
   $updated_amount = commerce_round(COMMERCE_ROUND_HALF_UP, $current_amount + $discount_amount['amount']);
 
   $difference = array(
-    'amount' => $discount_amount['amount'],
+    'amount' => commerce_round(COMMERCE_ROUND_HALF_UP, $discount_amount['amount']),
     'currency_code' => $discount_amount['currency_code'],
     'data' => array(
       'discount_name' => $discount_name,
@@ -355,13 +430,66 @@ function commerce_discount_add_price_component(EntityDrupalWrapper $line_item_wr
     ),
   );
 
-  // Set the amount of the unit price and add the difference as a component.
+  // Set the new unit price.
   $line_item_wrapper->commerce_unit_price->amount = $updated_amount;
+  // Add the discount amount as a price component.
+  $price = $line_item_wrapper->commerce_unit_price->value();
+  $type = empty($component_title) ? 'discount' : check_plain('discount|' . $component_title);
+  $line_item_wrapper->commerce_unit_price->data = commerce_price_component_add($price, $type, $difference, TRUE, TRUE);
 
-  $line_item_wrapper->commerce_unit_price->data = commerce_price_component_add(
-    $line_item_wrapper->commerce_unit_price->value(),
-    empty($component_title) ? 'discount' : $component_title,
-    $difference,
-    TRUE
-  );
+  // Update commerce_total so that the order total can be refreshed without
+  // saving the line item. Taken from CommerceLineItemEntityController::save().
+  $quantity = $line_item_wrapper->quantity->value();
+
+  // Update the total of the line item based on the quantity and unit price.
+  $unit_price = commerce_price_wrapper_value($line_item_wrapper, 'commerce_unit_price', TRUE);
+
+  $line_item_wrapper->commerce_total->amount = $quantity * $unit_price['amount'];
+  $line_item_wrapper->commerce_total->currency_code = $unit_price['currency_code'];
+
+  // Add the components multiplied by the quantity to the data array.
+  if (empty($unit_price['data']['components'])) {
+    $unit_price['data']['components'] = array();
+  }
+  else {
+    foreach ($unit_price['data']['components'] as $key => &$component) {
+      $component['price']['amount'] *= $quantity;
+    }
+  }
+
+  // Set the updated data array to the total price.
+  $line_item_wrapper->commerce_total->data = $unit_price['data'];
+}
+
+/**
+ * Updates the unit price of an existing discount line item.
+ *
+ * Non-discount line items are ignored.
+ *
+ * @param EntityDrupalWrapper $order_wrapper
+ *   The wrapped order entity.
+ * @param string $discount_name
+ *   The name of the discount being applied.
+ * @param array $discount_price
+ *   The discount amount price array (amount, currency_code).
+ *
+ * @return bool
+ *   TRUE if an existing line item was successfully modified, FALSE otherwise.
+ */
+function commerce_discount_set_existing_line_item_price(EntityDrupalWrapper $order_wrapper, $discount_name, $discount_price) {
+  $modified_existing = FALSE;
+  foreach ($order_wrapper->commerce_line_items as $line_item_wrapper) {
+    if ($line_item_wrapper->getBundle() == 'commerce_discount') {
+      // Add the discount component price if the line item was originally
+      // added by discount module.
+      $line_item = $line_item_wrapper->value();
+      if (isset($line_item->data['discount_name']) && $line_item->data['discount_name'] == $discount_name) {
+        commerce_discount_add_price_component($line_item_wrapper, $discount_name, $discount_price);
+        $line_item_wrapper->save();
+        $modified_existing = TRUE;
+      }
+    }
+  }
+
+  return $modified_existing;
 }

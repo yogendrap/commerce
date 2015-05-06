@@ -31,6 +31,13 @@ dependencies[] = rules_admin
 dependencies[] = views
 dependencies[] = views_ui
 
+; Install contrib dependencies
+dependencies[] = date
+dependencies[] = date_popup
+dependencies[] = date_api
+dependencies[] = message
+dependencies[] = message_notify
+
 ; Install the Commerce modules.
 dependencies[] = commerce
 dependencies[] = commerce_ui
@@ -40,13 +47,14 @@ dependencies[] = commerce_customer
 dependencies[] = commerce_customer_ui
 dependencies[] = commerce_line_item
 dependencies[] = commerce_line_item_ui
+dependencies[] = commerce_price
 dependencies[] = commerce_order
 dependencies[] = commerce_order_ui
 dependencies[] = commerce_payment
+dependencies[] = commerce_payment_example
 dependencies[] = commerce_payment_ui
 dependencies[] = commerce_shipping
 dependencies[] = commerce_shipping_ui
-dependencies[] = commerce_price
 dependencies[] = commerce_product
 dependencies[] = commerce_product_ui
 dependencies[] = commerce_product_pricing
@@ -78,7 +86,6 @@ dependencies[] = commerce_backoffice_order
 dependencies[] = commerce_backoffice_content
 dependencies[] = commerce_checkout_progress
 dependencies[] = commerceguys_marketplace
-dependencies[] = commerce_hosted_pci
 dependencies[] = commerce_amex
 dependencies[] = menu_attributes
 dependencies[] = fences
@@ -104,17 +111,15 @@ dependencies[] = search_api_ranges
 dependencies[] = commerce_kickstart_help
 dependencies[] = commerce_kickstart_inline_help
 dependencies[] = commerce_kickstart_order
-dependencies[] = commerce_kickstart_payment
 dependencies[] = commerce_kickstart_comment
 dependencies[] = commerce_kickstart_migrate
-dependencies[] = commerce_kickstart_dfp
 
 ; System Requirements.
 php_memory_limit = 128M
 
-; Information added by drupal.org packaging script on 2013-07-26
-version = "7.x-2.9"
+; Information added by Drupal.org packaging script on 2015-04-24
+version = "7.x-2.23"
 core = "7.x"
 project = "commerce_kickstart"
-datestamp = "1374852667"
+datestamp = "1429883631"
 
