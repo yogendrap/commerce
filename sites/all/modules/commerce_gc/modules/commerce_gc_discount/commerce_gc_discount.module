@@ -1,0 +1,81 @@
+<?php
+
+/*
+ * Implements hook_flush_caches().
+ */
+function commerce_gc_discount_flush_caches() {
+  module_load_install('commerce_gc_discount');
+  commerce_gc_discount_install_helper();
+}
+
+/*
+ * Rules action callback (overridden): fixed amount offers
+ */
+function commerce_gc_discount_fixed_amount(EntityDrupalWrapper $wrapper, $discount_name) {
+  $discount_wrapper = entity_metadata_wrapper('commerce_discount', $discount_name);
+  $discount_price = $discount_wrapper->commerce_discount_offer->commerce_fixed_amount->value();
+  $discount_price['amount'] = -$discount_price['amount'];
+  
+  module_load_include('inc', 'commerce_discount', 'commerce_discount.rules');
+
+  switch ($wrapper->type()) {
+    case 'commerce_order':      
+      $offset_amount = 0;
+      if (!$discount_wrapper->commerce_discount_offer->commerce_gc_apply->value()) {
+        // Find the sum of giftcard products on the order. This discount cannot
+        // touch this part of the order total.
+        foreach ($wrapper->commerce_line_items as $line_item_wrapper) {
+          if ($line_item_wrapper->value() && commerce_gc_product_line_item_is_giftcard($line_item_wrapper)) {
+            $offset_amount += $line_item_wrapper->commerce_total->amount->value();
+          }
+        }
+      }      
+      
+      // Set reference to the discount.
+      // @todo: It doesn't work with the wrapper.
+      $order = $wrapper->value();
+
+      // If the discount will bring the order to less than zero, set the discount
+      // amount so that it stops at zero.
+      $order_amount = $wrapper->commerce_order_total->amount->value() - $offset_amount;
+      if (-$discount_price['amount'] > $order_amount) {
+        $discount_price['amount'] = -$order_amount;
+      }
+
+      $delta = $wrapper->commerce_discounts->count();
+      $order->commerce_discounts[LANGUAGE_NONE][$delta]['target_id'] = $discount_wrapper->discount_id->value();
+
+      // Add the line item is it's not attached on order yet.
+      module_load_include('inc', 'commerce_discount', 'commerce_discount.rules');
+      if ($discount_price['amount'] != 0 && !commerce_discount_set_existing_line_item_price($wrapper, $discount_name, $discount_price)) {
+        commerce_discount_add_line_item($wrapper, $discount_name, $discount_price);
+      }
+
+      // Update the total order price, for the next rules condition (if any).
+      commerce_order_calculate_total($order);
+      break;
+
+    case 'commerce_line_item':
+      // Do not add the price component to giftcard line items unless the
+      // setting says this is ok.
+      if ($discount_wrapper->commerce_discount_offer->commerce_gc_apply->value() || !commerce_gc_product_line_item_is_giftcard($wrapper)) {
+        // Check whether this discount was already added as a price component.
+        $price_data = $wrapper->commerce_unit_price->data->value();
+
+        foreach ($price_data['components'] as $component) {
+          if (!empty($component['price']['data']['discount_name']) && $component['price']['data']['discount_name'] == $discount_wrapper->getIdentifier()) {
+            return;
+          }
+        }
+
+        // Do not allow negative line item totals.
+        $line_item_amount = $wrapper->commerce_unit_price->amount->value();
+        if (-$discount_price['amount'] > $line_item_amount) {
+          $discount_price['amount'] = -$line_item_amount;
+        }
+
+        commerce_discount_add_price_component($wrapper, $discount_name, $discount_price);
+      }
+      break;
+  }
+}

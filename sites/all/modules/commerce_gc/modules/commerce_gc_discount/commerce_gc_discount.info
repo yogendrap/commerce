@@ -1,0 +1,11 @@
+name = Commerce Giftcard Discount
+description = Commerce Giftcard Discounts module integration
+core = 7.x
+dependencies[] = commerce_discount
+dependencies[] = commerce_gc_product
+; Information added by Drupal.org packaging script on 2014-04-07
+version = "7.x-1.0-beta1"
+core = "7.x"
+project = "commerce_gc"
+datestamp = "1396830851"
+

@@ -1,0 +1,71 @@
+<?php
+
+/**
+ * @file
+ * Installs necessary fields for extra discounts.
+ */
+
+/*
+ * Field setup
+ */
+function commerce_gc_discount_install_helper() {
+  field_info_cache_clear();  
+  
+  $fields = field_info_fields();
+  $instances = field_info_instances();
+  
+  /*
+   * Commerce giftcard apply field (for fixed amount offers)
+   */
+  
+  if (empty($fields['commerce_gc_apply'])) {
+    $field = array(
+      'settings' => array(
+        'allowed_values' => array(
+          0 => 'No',
+          1 => 'Yes',
+        ),
+        'allowed_values_function' => '',
+      ),
+      'field_name' => 'commerce_gc_apply',
+      'type' => 'list_boolean',
+      'locked' => TRUE,
+      'cardinality' => '1',
+    );
+    field_create_field($field);    
+  }
+  if (empty($instances['commerce_discount_offer']['fixed_amount']['commerce_gc_apply'])) {
+    $instance = array(
+      'label' => t('Discount may apply to giftcards'),
+      'widget' => array(
+        'weight' => '7',
+        'type' => 'options_onoff',
+        'active' => 1,
+        'settings' => array(
+          'display_label' => 1,
+        ),
+      ),
+      'settings' => array(
+        'user_register_form' => 0,
+      ),
+      'required' => 0,
+      'description' => t('If checked, this discount may be applied towards giftcard purchases.'),
+      'default_value' => array(
+        0 => array(
+          'value' => 0,
+        ),
+      ),
+      'field_name' => 'commerce_gc_apply',
+      'entity_type' => 'commerce_discount_offer',
+      'bundle' => 'fixed_amount',
+    );
+    field_create_instance($instance);    
+  }
+}
+
+/*
+ * Implements hook_install().
+ */
+function commerce_gc_discount_install() {
+  commerce_gc_discount_install_helper();
+}

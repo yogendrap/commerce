@@ -1,0 +1,30 @@
+name = "Gigya - Customer Identity Management"
+description = "Allows sites to utilize the Gigya API for authentication and social network updates."
+package = Gigya
+core = 7.x
+php = 5.2
+configure = admin/config/services/gigya
+
+dependencies[] = token
+dependencies[] = entity
+dependencies[] = ctools
+files[] = GSSDK.php
+files[] = gigya.admin.inc
+files[] = gigya.inc
+files[] = gigya.install
+files[] = gigya.module
+files[] = gigya.pages.inc
+files[] = GigyaUser.inc
+files[] = includes/gigya.field.inc
+files[] = includes/gigya.rules.inc
+files[] = includes/GigyaAccount.inc
+files[] = includes/gigya_comments.inc
+files[] = includes/placeholders.inc
+
+
+; Information added by Drupal.org packaging script on 2015-03-11
+version = "7.x-4.7"
+core = "7.x"
+project = "gigya"
+datestamp = "1426068451"
+
