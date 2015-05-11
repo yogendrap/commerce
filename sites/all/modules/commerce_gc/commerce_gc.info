@@ -2,7 +2,6 @@ name = Commerce Giftcard
 description = Provides code-based giftcards and tracks balances
 core = 7.x
 
-dependencies[] = commerce_coupon_user
 
 files[] = includes/views/handlers/commerce_gc_handler_field_balance_summary.inc
 files[] = includes/views/handlers/commerce_gc_handler_field_amount.inc
